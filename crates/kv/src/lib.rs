@@ -63,7 +63,39 @@ pub struct KvState {
 
 impl KvState {
     pub fn apply(&mut self, cmd: &Command) -> OpResult {
-        let _ = (&self.data, &self.sessions, cmd);
-        todo!("SG4")
+        if let Some((last, cached)) = self.sessions.get(&cmd.client)
+            && cmd.seq <= *last
+        {
+            return cached.clone();
+        }
+        let result = match &cmd.op {
+            Op::Get { key } => OpResult::Value(self.data.get(key).cloned()),
+            Op::Put { key, value } => {
+                self.data.insert(key.clone(), value.clone());
+                OpResult::Ok
+            }
+            Op::Delete { key } => {
+                self.data.remove(key);
+                OpResult::Ok
+            }
+        };
+        self.sessions.insert(cmd.client, (cmd.seq, result.clone()));
+        result
+    }
+
+    pub fn get(&self, key: &[u8]) -> Option<&[u8]> {
+        self.data.get(key).map(Vec::as_slice)
+    }
+
+    pub fn session(&self, client: ClientId) -> Option<(u64, &OpResult)> {
+        self.sessions.get(&client).map(|(seq, r)| (*seq, r))
+    }
+
+    pub fn data(&self) -> impl ExactSizeIterator<Item = (&[u8], &[u8])> {
+        self.data.iter().map(|(k, v)| (k.as_slice(), v.as_slice()))
+    }
+
+    pub fn sessions(&self) -> impl ExactSizeIterator<Item = (ClientId, u64, &OpResult)> {
+        self.sessions.iter().map(|(c, (s, r))| (*c, *s, r))
     }
 }

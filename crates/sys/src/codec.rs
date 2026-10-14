@@ -1,4 +1,4 @@
-use kv::{ClientReply, ClientRequest, Command, Op, OpResult};
+use kv::{ClientReply, ClientRequest, Command, KvState, Op, OpResult};
 use raft::{Entry, Envelope, HardState, Message, Payload};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -112,6 +112,12 @@ impl<T: Decode> Decode for Option<T> {
 }
 
 impl<T: Encode> Encode for Vec<T> {
+    fn encode(&self, buf: &mut Vec<u8>) {
+        self.as_slice().encode(buf);
+    }
+}
+
+impl<T: Encode> Encode for [T] {
     fn encode(&self, buf: &mut Vec<u8>) {
         let len = u32::try_from(self.len()).expect("vec too long to encode");
         buf.extend_from_slice(&len.to_le_bytes());
@@ -404,5 +410,18 @@ impl Decode for ClientReply {
             },
             t => return Err(CodecError::BadTag(t)),
         })
+    }
+}
+
+impl Encode for KvState {
+    fn encode(&self, buf: &mut Vec<u8>) {
+        (self.data().len() as u64).encode(buf);
+        for (k, v) in self.data() {
+            fields!(buf; k, v);
+        }
+        (self.sessions().len() as u64).encode(buf);
+        for (client, seq, result) in self.sessions() {
+            fields!(buf; client, seq, result);
+        }
     }
 }
