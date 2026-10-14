@@ -1,4 +1,5 @@
 pub mod codec;
+mod crc32c;
 mod log_store;
 
 use kv::{ClientId, ClientReply};
@@ -26,6 +27,9 @@ pub trait Transport {
     fn reply(&mut self, to: ClientId, reply: ClientReply);
 }
 
+/// Byte-addressed files (D-06). `sync(f)` makes every earlier `write` and `truncate` of `f`
+/// durable; on crash, unsynced operations may each be lost and the last write torn (D-07).
+/// Bytes never written (gaps from a lost write) read as zero.
 pub trait Disk {
     fn len(&self, f: FileId) -> Result<u64>;
     fn read(&self, f: FileId, offset: u64, buf: &mut [u8]) -> Result<()>;
