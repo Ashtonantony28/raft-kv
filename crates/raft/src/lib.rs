@@ -1,4 +1,8 @@
 mod core;
+mod election;
+mod log_matching;
+#[cfg(test)]
+mod tests;
 
 pub use core::Raft;
 
