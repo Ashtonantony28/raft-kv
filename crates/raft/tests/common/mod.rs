@@ -170,6 +170,17 @@ pub fn applied(out: &[Output]) -> Vec<Entry> {
         .collect()
 }
 
+/// Every entry appended across all `Append` outputs, in order.
+pub fn appended(out: &[Output]) -> Vec<Entry> {
+    out.iter()
+        .filter_map(|o| match o {
+            Output::Append(es) => Some(es.clone()),
+            _ => None,
+        })
+        .flatten()
+        .collect()
+}
+
 pub fn has_storage_write(out: &[Output]) -> bool {
     out.iter()
         .any(|o| matches!(o, Output::Truncate { .. } | Output::Append(_)))
@@ -215,7 +226,9 @@ pub struct Cluster {
     pub isolated: BTreeSet<NodeId>,
     pub durable: BTreeMap<NodeId, Restored>,
     pub leaders: BTreeMap<Term, NodeId>,
-    pub committed: Vec<Entry>,
+    /// Committed entries, each with the lowest term of any node that applied it: an upper bound
+    /// on the term it committed in, so every leader of that term or later must hold it.
+    pub committed: Vec<(Entry, Term)>,
     pub applied: BTreeMap<NodeId, LogIndex>,
 }
 
@@ -283,9 +296,13 @@ impl Cluster {
                         let a = self.applied.get_mut(&id).unwrap();
                         *a += 1;
                         assert_eq!(e.index, *a, "node {id} applied out of order");
-                        match self.committed.get(e.index as usize - 1) {
-                            Some(c) => assert_eq!(c, e, "node {id} applied a different entry"),
-                            None => self.committed.push(e.clone()),
+                        let term = self.nodes[&id].status().term;
+                        match self.committed.get_mut(e.index as usize - 1) {
+                            Some((c, t)) => {
+                                assert_eq!(c, e, "node {id} applied a different entry");
+                                *t = (*t).min(term);
+                            }
+                            None => self.committed.push((e.clone(), term)),
                         }
                     }
                 }
@@ -307,12 +324,15 @@ impl Cluster {
             let prev = *self.leaders.entry(s.term).or_insert(id);
             assert_eq!(prev, id, "two leaders in term {}", s.term);
             let log = self.raft(id).log();
-            assert!(
-                log.len() >= self.committed.len()
-                    && log[..self.committed.len()] == self.committed[..],
-                "leader {id} of term {} is missing committed entries",
-                s.term
-            );
+            for (e, _) in self.committed.iter().filter(|(_, t)| *t <= s.term) {
+                assert_eq!(
+                    log.get(e.index as usize - 1),
+                    Some(e),
+                    "leader {id} of term {} is missing committed entry {}",
+                    s.term,
+                    e.index
+                );
+            }
         }
         let mine = self.raft(id).log();
         for (other, r) in &self.nodes {
@@ -345,6 +365,10 @@ impl Cluster {
         };
         self.step(env.to, Input::Receive(env));
         true
+    }
+
+    pub fn committed_entries(&self) -> Vec<Entry> {
+        self.committed.iter().map(|(e, _)| e.clone()).collect()
     }
 
     pub fn deliver_all(&mut self) {

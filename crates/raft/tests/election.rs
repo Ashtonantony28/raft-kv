@@ -36,6 +36,8 @@ fn election_timeout_is_randomized_within_range() {
 #[ignore = "SG2-H"]
 fn timeout_starts_an_election() {
     let mut r = node(1, 3, hs(3, None), &[1, 1, 2]);
+    step(&mut r, append(2, 1, 3, (3, 2), vec![], 0));
+    assert_eq!(r.status().leader, Some(2));
     let (_, out) = tick_until_send(&mut r, 20);
     assert_eq!(persisted(&out).last(), Some(&hs(4, Some(1))));
     let mut to = Vec::new();
@@ -175,7 +177,7 @@ fn rejected_higher_term_candidate_still_bumps_term() {
 #[test]
 #[ignore = "SG2-H"]
 fn granting_a_vote_resets_the_election_timer() {
-    let mut r = node(1, 3, hs(1, None), &[]);
+    let mut r = node(1, 3, hs(2, None), &[]);
     for _ in 0..9 {
         assert!(step(&mut r, raft::Input::Tick).is_empty());
     }
@@ -252,6 +254,39 @@ fn split_vote_leads_to_a_new_election() {
     );
     step(&mut r, vote(2, 1, 3, true));
     assert_eq!(r.status().role, Role::Leader);
+}
+
+#[test]
+#[ignore = "SG2-H"]
+fn votes_from_an_earlier_election_do_not_carry_over() {
+    let mut r = node(1, 5, hs(1, None), &[]);
+    tick_until_send(&mut r, 20);
+    step(&mut r, vote(2, 1, 2, true));
+    tick_until_send(&mut r, 20);
+    assert_eq!(r.status().term, 3);
+    step(&mut r, vote(3, 1, 3, true));
+    assert_eq!(
+        r.status().role,
+        Role::Candidate,
+        "node 2's term-2 vote was counted in term 3"
+    );
+    step(&mut r, vote(4, 1, 3, true));
+    assert_eq!(r.status().role, Role::Leader);
+}
+
+#[test]
+#[ignore = "SG2-H"]
+fn rejected_vote_does_not_reset_the_election_timer() {
+    let mut r = node(1, 3, hs(2, None), &[1, 2]);
+    for _ in 0..9 {
+        assert!(step(&mut r, raft::Input::Tick).is_empty());
+    }
+    assert_eq!(
+        vote_resp(&step(&mut r, request_vote(2, 1, 2, 1, 1))),
+        (2, false)
+    );
+    let (ticks, _) = tick_until_send(&mut r, 20);
+    assert!(ticks <= 10, "timer was reset by a rejected vote");
 }
 
 #[test]

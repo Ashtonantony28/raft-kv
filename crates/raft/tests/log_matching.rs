@@ -37,6 +37,18 @@ fn rejects_stale_term_without_side_effects() {
 
 #[test]
 #[ignore = "SG2-H"]
+fn stale_leader_does_not_reset_the_election_timer() {
+    let mut r = follower(3, &[]);
+    for _ in 0..9 {
+        assert!(step(&mut r, raft::Input::Tick).is_empty());
+    }
+    step(&mut r, append(2, 1, 2, (0, 0), vec![], 0));
+    let (ticks, _) = tick_until_send(&mut r, 20);
+    assert!(ticks <= 10, "timer was reset by a stale-term append");
+}
+
+#[test]
+#[ignore = "SG2-H"]
 fn adopts_higher_term() {
     let mut r = follower(1, &[1]);
     let out = step(&mut r, append(2, 1, 3, (1, 1), vec![], 0));
@@ -54,8 +66,8 @@ fn rejects_when_prev_index_is_missing() {
     let (term, success, _, hint) = append_resp(&out);
     assert_eq!((term, success), (2, false));
     assert!(
-        (1..=3).contains(&hint),
-        "hint {hint} must be a next index within the log + 1"
+        (1..=5).contains(&hint),
+        "hint {hint} must probe at or before prev_log_index"
     );
     assert!(!has_storage_write(&out));
     assert_eq!(
@@ -89,7 +101,7 @@ fn appends_new_entries() {
     let mut r = follower(2, &[1]);
     let new = vec![entry(2, 2), entry(2, 3)];
     let out = step(&mut r, append(2, 1, 2, (1, 1), new.clone(), 0));
-    assert!(out.contains(&Output::Append(new)));
+    assert_eq!(appended(&out), new);
     assert!(!out.iter().any(|o| matches!(o, Output::Truncate { .. })));
     assert_eq!(append_resp(&out).2, 3);
     assert_eq!(r.log(), entries(&[1, 2, 2]).as_slice());
@@ -101,10 +113,9 @@ fn truncates_conflicting_suffix() {
     let mut r = follower(1, &[1, 1, 1, 1]);
     let out = step(&mut r, append(2, 1, 2, (2, 1), vec![entry(2, 3)], 0));
     let truncate = out.iter().position(|o| *o == Output::Truncate { from: 3 });
-    let append = out
-        .iter()
-        .position(|o| *o == Output::Append(vec![entry(2, 3)]));
+    let append = out.iter().position(|o| matches!(o, Output::Append(_)));
     assert!(truncate.is_some() && truncate < append, "{out:?}");
+    assert_eq!(appended(&out), vec![entry(2, 3)]);
     let (_, success, match_index, _) = append_resp(&out);
     assert_eq!((success, match_index), (true, 3));
     assert_eq!(r.log(), entries(&[1, 1, 2]).as_slice());
@@ -117,7 +128,7 @@ fn truncates_only_from_first_conflict() {
     let new = vec![entry(1, 2), entry(1, 3), entry(2, 4), entry(2, 5)];
     let out = step(&mut r, append(2, 1, 2, (1, 1), new, 0));
     assert!(out.contains(&Output::Truncate { from: 4 }), "{out:?}");
-    assert!(out.contains(&Output::Append(vec![entry(2, 4), entry(2, 5)])));
+    assert_eq!(appended(&out), vec![entry(2, 4), entry(2, 5)]);
     assert_eq!(r.log(), entries(&[1, 1, 1, 2, 2]).as_slice());
 }
 
@@ -302,7 +313,10 @@ fn figure_8_old_entries_commit_with_current_term_entry() {
 
     c.heartbeat(1);
     assert_eq!(c.raft(1).status().commit, 3);
-    assert_eq!(c.committed, vec![entry(1, 1), entry(2, 2), noop(4, 3)]);
+    assert_eq!(
+        c.committed_entries(),
+        vec![entry(1, 1), entry(2, 2), noop(4, 3)]
+    );
 
     c.isolated.clear();
     for _ in 0..3 {
