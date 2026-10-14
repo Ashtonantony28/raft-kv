@@ -1,0 +1,14 @@
+[package]
+name = "node"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+raft.workspace = true
+kv.workspace = true
+sys.workspace = true

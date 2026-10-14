@@ -1,0 +1,11 @@
+disallowed-types = [
+  { path = "std::collections::HashMap", reason = "nondeterministic iteration; use BTreeMap (D-09)" },
+  { path = "std::collections::HashSet", reason = "nondeterministic iteration; use BTreeSet (D-09)" },
+  { path = "std::time::Instant", reason = "wall clock; use io::Clock (D-09)" },
+  { path = "std::time::SystemTime", reason = "wall clock; use io::Clock (D-09)" },
+]
+disallowed-methods = [
+  { path = "std::thread::spawn", reason = "simulated code is single-threaded (D-12)" },
+  { path = "std::time::Instant::now", reason = "wall clock; use io::Clock (D-09)" },
+  { path = "std::time::SystemTime::now", reason = "wall clock; use io::Clock (D-09)" },
+]

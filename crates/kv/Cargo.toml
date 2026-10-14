@@ -1,0 +1,13 @@
+[package]
+name = "kv"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+raft.workspace = true
+serde = { workspace = true, optional = true }
+
+[lints]
+workspace = true
